@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG 评测平台</title>
+    <title>RAG &amp; Agent 评测平台</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -12,14 +12,14 @@
             color: #1f2937;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         }
-        .container { max-width: 1180px; margin: 0 auto; padding: 28px 20px 48px; }
+        .container { max-width: 1240px; margin: 0 auto; padding: 28px 20px 48px; }
         header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
         h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
         .subtitle { margin: 6px 0 0; color: #6b7280; font-size: 14px; }
         .target-badge { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 999px; padding: 7px 12px; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
         .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); padding: 18px 20px; margin-bottom: 18px; }
         .controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-        .field { display: flex; flex-direction: column; gap: 6px; min-width: 260px; flex: 1; }
+        .field { display: flex; flex-direction: column; gap: 6px; min-width: 300px; flex: 1; }
         label { font-size: 12px; color: #6b7280; font-weight: 600; }
         select, button { font: inherit; }
         select { padding: 9px 11px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #111827; }
@@ -31,10 +31,11 @@
         .progress > div { height: 100%; width: 0; background: #2563eb; border-radius: 999px; transition: width 0.3s ease; }
         .muted { color: #6b7280; font-size: 13px; }
         .message { margin-top: 10px; color: #b91c1c; font-size: 13px; min-height: 18px; }
-        .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+        .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
         .metric { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
         .metric .label { color: #6b7280; font-size: 12px; margin-bottom: 6px; }
-        .metric .value { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+        .metric .value { font-size: 23px; font-weight: 700; letter-spacing: -0.02em; }
+        .metric .hint { color: #9ca3af; font-size: 11px; margin-top: 4px; }
         .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
         .section-title h2 { font-size: 16px; margin: 0; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -47,6 +48,7 @@
         .badge.fail { background: #fee2e2; color: #991b1b; }
         .badge.running { background: #fef3c7; color: #92400e; }
         .badge.neutral { background: #f3f4f6; color: #4b5563; }
+        .badge.agent { background: #e0e7ff; color: #3730a3; }
         .empty { color: #9ca3af; padding: 18px 0; text-align: center; }
         .detail { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; margin-top: 4px; }
         .detail h3 { font-size: 13px; color: #6b7280; margin: 0 0 8px; }
@@ -55,9 +57,10 @@
         .kv .k { color: #6b7280; }
         .chips { display: flex; flex-wrap: wrap; gap: 6px; }
         .chip { background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 3px 9px; font-size: 12px; }
-        .source { border: 1px solid #eef0f4; border-radius: 8px; padding: 9px 10px; margin-bottom: 8px; font-size: 12px; }
-        .source .name { font-weight: 600; color: #111827; }
-        .source .snippet { color: #6b7280; margin-top: 4px; white-space: pre-wrap; word-break: break-word; max-height: 90px; overflow: auto; }
+        .source, .tool { border: 1px solid #eef0f4; border-radius: 8px; padding: 9px 10px; margin-bottom: 8px; font-size: 12px; }
+        .source .name, .tool .name { font-weight: 600; color: #111827; }
+        .source .snippet, .tool .snippet { color: #6b7280; margin-top: 4px; white-space: pre-wrap; word-break: break-word; max-height: 110px; overflow: auto; }
+        .judge-reason { background: #f8fafc; border: 1px solid #eef0f4; border-radius: 8px; padding: 10px; font-size: 12px; color: #374151; white-space: pre-wrap; line-height: 1.6; margin-bottom: 12px; }
         .hidden { display: none !important; }
         .history td { cursor: pointer; }
         @media (max-width: 800px) {
@@ -71,10 +74,10 @@
 <div class="container">
     <header>
         <div>
-            <h1>RAG 评测平台</h1>
-            <p class="subtitle">数据集 → 异步评测 → 指标计算 → 报告与失败归因</p>
+            <h1>RAG &amp; Agent 评测平台</h1>
+            <p class="subtitle">数据集 → 异步评测 → 规则指标 + LLM judge → 报告与失败归因</p>
         </div>
-        <div class="target-badge">target: RAG POST /api/chat</div>
+        <div class="target-badge">RAG :8081 &nbsp;|&nbsp; Agent :8080 &nbsp;|&nbsp; Judge : GLM-4.7</div>
     </header>
 
     <section class="card">
@@ -95,8 +98,9 @@
 
     <section id="summary" class="summary hidden">
         <div class="metric"><div class="label">通过率</div><div class="value" id="passRate">—</div></div>
-        <div class="metric"><div class="label">平均分</div><div class="value" id="avgScore">—</div></div>
-        <div class="metric"><div class="label">检索命中率</div><div class="value" id="hitRate">—</div></div>
+        <div class="metric"><div class="label">平均分</div><div class="value" id="avgScore">—</div><div class="hint">judge 可用时取 judge 分</div></div>
+        <div class="metric"><div class="label" id="hitLabel">命中率</div><div class="value" id="hitRate">—</div></div>
+        <div class="metric"><div class="label">Judge 均分</div><div class="value" id="avgJudge">—</div><div class="hint" id="judgeCoverage">覆盖 0%</div></div>
         <div class="metric"><div class="label">平均耗时</div><div class="value" id="avgLatency">—</div></div>
     </section>
 
@@ -113,13 +117,15 @@
                     <th>问题</th>
                     <th>结果</th>
                     <th>分数</th>
-                    <th>检索</th>
+                    <th>规则分</th>
+                    <th>Judge</th>
+                    <th id="hitHeader">命中</th>
                     <th>耗时</th>
                     <th>失败类型</th>
                 </tr>
                 </thead>
                 <tbody id="resultsBody">
-                <tr><td colspan="7" class="empty">暂无结果</td></tr>
+                <tr><td colspan="9" class="empty">暂无结果</td></tr>
                 </tbody>
             </table>
         </div>
@@ -132,11 +138,13 @@
         </div>
         <div class="detail">
             <div>
-                <h3>问题 / 模型回答 / 参考答案</h3>
+                <h3>问题 / 回答 / 参考答案</h3>
                 <div class="kv">
                     <div class="k">问题</div><div id="detailQuestion">—</div>
-                    <div class="k">期望来源</div><div id="detailDoc">—</div>
+                    <div class="k" id="detailTargetLabel">期望来源</div><div id="detailTarget">—</div>
                     <div class="k">期望关键词</div><div id="detailKeywords" class="chips"></div>
+                    <div class="k" id="detailAgentStatusRow" style="display:none;">Agent 状态</div>
+                    <div id="detailAgentStatus" style="display:none;"></div>
                 </div>
                 <h3>模型回答</h3>
                 <pre id="detailAnswer">—</pre>
@@ -148,14 +156,25 @@
                 <div class="kv">
                     <div class="k">关键词覆盖</div><div id="detailCoverage">—</div>
                     <div class="k">答案相似度</div><div id="detailSimilarity">—</div>
-                    <div class="k">综合分</div><div id="detailScore">—</div>
-                    <div class="k">耗时</div><div id="detailLatency">—</div>
+                    <div class="k">规则分</div><div id="detailRuleScore">—</div>
+                    <div class="k">有效分</div><div id="detailScore">—</div>
+                    <div class="k">Judge</div><div id="detailJudgeScore">—</div>
+                    <div class="k">被测耗时</div><div id="detailLatency">—</div>
+                    <div class="k">Judge 耗时</div><div id="detailJudgeLatency">—</div>
                     <div class="k">失败类型</div><div id="detailFailure">—</div>
                 </div>
+                <h3>Judge 理由</h3>
+                <div id="detailJudgeReason" class="judge-reason">—</div>
                 <h3>错误信息</h3>
                 <pre id="detailError" class="hidden"></pre>
-                <h3>来源引用</h3>
-                <div id="detailSources" class="muted">—</div>
+                <div id="detailSourcesSection">
+                    <h3>来源引用</h3>
+                    <div id="detailSources" class="muted">—</div>
+                </div>
+                <div id="detailToolsSection" class="hidden">
+                    <h3>工具调用</h3>
+                    <div id="detailTools" class="muted">—</div>
+                </div>
             </div>
         </div>
     </section>
@@ -170,6 +189,7 @@
                 <thead>
                 <tr>
                     <th>Run</th>
+                    <th>类型</th>
                     <th>数据集</th>
                     <th>状态</th>
                     <th>通过率</th>
@@ -178,7 +198,7 @@
                 </tr>
                 </thead>
                 <tbody id="historyBody">
-                <tr><td colspan="6" class="empty">暂无运行记录</td></tr>
+                <tr><td colspan="7" class="empty">暂无运行记录</td></tr>
                 </tbody>
             </table>
         </div>
@@ -186,7 +206,7 @@
 </div>
 
 <script>
-    const state = { currentRunId: null, timer: null, results: [] };
+    const state = { currentRunId: null, targetType: 'RAG', timer: null, results: [] };
 
     const $ = (id) => document.getElementById(id);
 
@@ -211,13 +231,30 @@
         return { RUNNING: '运行中', SUCCESS: '完成', FAILED: '失败' }[status] || status;
     }
 
+    function typeLabel(type) {
+        return type === 'AGENT' ? 'Agent' : 'RAG';
+    }
+
     function failureLabel(type) {
         return {
             PASS: '通过',
             RETRIEVAL_MISS: '检索未命中',
+            TOOL_MISS: '工具未命中',
             ANSWER_INCOMPLETE: '答案不完整',
-            TARGET_ERROR: '目标异常'
+            AGENT_ERROR: 'Agent 异常',
+            TARGET_ERROR: '目标异常',
+            JUDGE_FAIL: 'Judge 未通过'
         }[type] || type || '—';
+    }
+
+    function judgeHtml(result) {
+        if (!result.judgeStatus || result.judgeStatus === 'SKIPPED') {
+            return '<span class="badge neutral">未启用</span>';
+        }
+        if (result.judgeStatus === 'ERROR') {
+            return '<span class="badge fail">失败</span>';
+        }
+        return `<span class="badge pass">${result.judgeScore}</span>`;
     }
 
     function formatTime(value) {
@@ -229,8 +266,24 @@
         return value === null || value === undefined ? '—' : `${(value * 100).toFixed(1)}%`;
     }
 
+    function hitText(result) {
+        const value = state.targetType === 'AGENT' ? result.toolHit : result.retrievalHit;
+        return value === null || value === undefined ? '—' : (value ? '是' : '否');
+    }
+
+    function applyTargetType(targetType) {
+        state.targetType = targetType;
+        const label = targetType === 'AGENT' ? '工具命中率' : '检索命中率';
+        $('hitLabel').textContent = label;
+        $('hitHeader').textContent = targetType === 'AGENT' ? '工具命中' : '检索命中';
+        $('resultsHint').textContent = targetType === 'AGENT'
+            ? 'Agent 数据集：工具命中 + 最终回答质量'
+            : 'RAG 数据集：检索命中 + 回答质量';
+    }
+
     function renderRun(run) {
         state.currentRunId = run.id;
+        applyTargetType(run.targetType);
         $('progressBar').style.width = run.total === 0 ? '100%' : `${Math.min(100, run.completed / run.total * 100)}%`;
         $('progressText').textContent = `${run.completed} / ${run.total}`;
         const badge = $('statusBadge');
@@ -241,9 +294,11 @@
         $('summary').classList.remove('hidden');
         $('passRate').textContent = percent(summary.passRate);
         $('avgScore').textContent = summary.avgScore == null ? '—' : Number(summary.avgScore).toFixed(1);
-        $('hitRate').textContent = percent(summary.retrievalHitRate);
+        $('hitRate').textContent = percent(summary.hitRate);
+        $('avgJudge').textContent = summary.avgJudgeScore == null ? '—' : Number(summary.avgJudgeScore).toFixed(1);
+        $('judgeCoverage').textContent = `覆盖 ${percent(summary.judgeCoverage)}`;
         $('avgLatency').textContent = summary.avgLatencyMs == null ? '—' : `${Math.round(summary.avgLatencyMs)} ms`;
-        $('resultsHint').textContent = `${run.datasetName} · Run #${run.id}`;
+        $('resultsHint').textContent = `${typeLabel(run.targetType)} · ${run.datasetName} · Run #${run.id}`;
         $('startBtn').disabled = run.status === 'RUNNING';
         if (run.status !== 'RUNNING') {
             loadResults(run.id);
@@ -254,18 +309,19 @@
         state.results = results || [];
         const body = $('resultsBody');
         if (!state.results.length) {
-            body.innerHTML = '<tr><td colspan="7" class="empty">暂无结果</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="empty">暂无结果</td></tr>';
             return;
         }
         body.innerHTML = state.results.map((result, index) => {
-            const badgeClass = result.failureType === 'TARGET_ERROR' ? 'fail' : (result.pass ? 'pass' : 'fail');
-            const hitText = result.retrievalHit === null ? '—' : (result.retrievalHit ? '是' : '否');
+            const badgeClass = result.pass ? 'pass' : 'fail';
             return `<tr data-index="${index}">
                 <td>${result.caseId}</td>
                 <td>${escapeHtml(result.question)}</td>
                 <td><span class="badge ${badgeClass}">${result.pass ? '通过' : '失败'}</span></td>
                 <td>${result.score}</td>
-                <td>${hitText}</td>
+                <td>${result.ruleScore}</td>
+                <td>${judgeHtml(result)}</td>
+                <td>${hitText(result)}</td>
                 <td>${result.latencyMs} ms</td>
                 <td>${failureLabel(result.failureType)}</td>
             </tr>`;
@@ -278,18 +334,35 @@
     function renderDetail(result) {
         if (!result) return;
         $('detailSection').classList.remove('hidden');
-        $('detailCase').textContent = `Case #${result.caseId}`;
+        $('detailCase').textContent = `${typeLabel(result.targetType)} · Case #${result.caseId}`;
         $('detailQuestion').textContent = result.question || '—';
-        $('detailDoc').textContent = result.expectedDocument || '—';
+        $('detailTargetLabel').textContent = result.targetType === 'AGENT' ? '期望工具' : '期望来源';
+        $('detailTarget').textContent = result.targetType === 'AGENT'
+            ? (result.expectedTool || '—')
+            : (result.expectedDocument || '—');
         $('detailKeywords').innerHTML = (result.expectedKeywords || [])
             .map((keyword) => `<span class="chip">${escapeHtml(keyword)}</span>`).join('') || '—';
         $('detailAnswer').textContent = result.answer || '（空）';
         $('detailReference').textContent = result.referenceAnswer || '—';
         $('detailCoverage').textContent = percent(result.keywordCoverage);
         $('detailSimilarity').textContent = percent(result.similarity);
-        $('detailScore').textContent = result.score;
+        $('detailRuleScore').textContent = result.ruleScore ?? '—';
+        $('detailScore').textContent = result.score ?? '—';
+        $('detailJudgeScore').textContent = result.judgeStatus === 'OK'
+            ? `${result.judgeScore}（${result.judgeModel || 'judge'}）`
+            : (result.judgeStatus === 'ERROR' ? '失败' : '未启用');
+        $('detailJudgeReason').textContent = result.judgeReason
+            || (result.judgeStatus === 'ERROR' ? 'judge 调用失败，已回退规则指标' : 'judge 未启用');
         $('detailLatency').textContent = `${result.latencyMs} ms`;
+        $('detailJudgeLatency').textContent = result.judgeLatencyMs ? `${result.judgeLatencyMs} ms` : '—';
         $('detailFailure').textContent = failureLabel(result.failureType);
+
+        const isAgent = result.targetType === 'AGENT';
+        $('detailAgentStatusRow').style.display = isAgent ? '' : 'none';
+        $('detailAgentStatus').style.display = isAgent ? '' : 'none';
+        $('detailAgentStatus').textContent = result.agentStatus || '—';
+        $('detailSourcesSection').style.display = isAgent ? 'none' : '';
+        $('detailToolsSection').classList.toggle('hidden', !isAgent);
 
         const errorEl = $('detailError');
         if (result.error) {
@@ -307,6 +380,15 @@
                     <div class="snippet">${escapeHtml(source.snippet || '')}</div>
                 </div>`).join('')
             : '<span class="muted">无来源引用</span>';
+
+        const tools = result.toolCalls || [];
+        $('detailTools').innerHTML = tools.length
+            ? tools.map((tool) => `<div class="tool">
+                    <div class="name">${escapeHtml(tool.name || '未知工具')}</div>
+                    <div class="snippet">参数：${escapeHtml(tool.arguments || '')}
+结果：${escapeHtml(tool.result || '')}</div>
+                </div>`).join('')
+            : '<span class="muted">无工具调用</span>';
         $('detailSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
@@ -380,13 +462,14 @@
             const runs = await api('/api/runs');
             const body = $('historyBody');
             if (!runs.length) {
-                body.innerHTML = '<tr><td colspan="6" class="empty">暂无运行记录</td></tr>';
+                body.innerHTML = '<tr><td colspan="7" class="empty">暂无运行记录</td></tr>';
                 return;
             }
             body.innerHTML = runs.map((run) => {
                 const summary = run.summary || {};
                 return `<tr data-run="${run.id}">
                     <td>#${run.id}</td>
+                    <td><span class="badge ${run.targetType === 'AGENT' ? 'agent' : 'neutral'}">${typeLabel(run.targetType)}</span></td>
                     <td>${escapeHtml(run.datasetName)}</td>
                     <td>${statusLabel(run.status)}</td>
                     <td>${percent(summary.passRate)}</td>
@@ -420,7 +503,7 @@
             const datasets = await api('/api/datasets');
             const select = $('datasetSelect');
             select.innerHTML = datasets.map((dataset) =>
-                `<option value="${dataset.id}">${escapeHtml(dataset.name)}（${dataset.caseCount} 条）</option>`
+                `<option value="${dataset.id}">[${typeLabel(dataset.targetType)}] ${escapeHtml(dataset.name)}（${dataset.caseCount} 条）</option>`
             ).join('');
             await loadHistory();
         } catch (error) {

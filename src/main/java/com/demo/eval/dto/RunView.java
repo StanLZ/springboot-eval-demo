@@ -1,5 +1,6 @@
 package com.demo.eval.dto;
 
+import com.demo.eval.model.EvalTargetType;
 import com.demo.eval.model.RunStatus;
 import com.demo.eval.model.RunSummary;
 
@@ -12,6 +13,7 @@ public record RunView(
         long id,
         long datasetId,
         String datasetName,
+        EvalTargetType targetType,
         RunStatus status,
         int total,
         int completed,

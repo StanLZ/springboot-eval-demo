@@ -5,27 +5,38 @@ import java.util.List;
 /**
  * 单条用例的评测结果。
  *
- * @param retrievalHit     是否命中期望来源；null 表示该用例没有配置期望文档
- * @param keywordCoverage  期望关键词覆盖率 0~1
- * @param similarity       与参考答案的字符 bigram Dice 相似度 0~1
- * @param score            综合分 0~100
- * @param pass             是否通过
- * @param failureType      失败类型（PASS 表示通过）
- * @param error            被测系统异常时的错误信息
+ * <p>RAG 用例使用 sources / retrievalHit；Agent 用例使用 toolCalls / toolHit / agentStatus。
+ * judge 只记录，不覆盖规则指标，方便对比规则分与 judge 分。
+ *
+ * @param ruleScore      规则分：关键词覆盖 * 0.6 + 相似度 * 0.4
+ * @param score          有效分：judge OK 时取 judgeScore，否则取 ruleScore
+ * @param latencyMs      被测系统调用耗时，不含 judge
+ * @param judgeLatencyMs judge 调用耗时
  */
 public record EvalResult(
         long caseId,
+        EvalTargetType targetType,
         String question,
         String referenceAnswer,
         List<String> expectedKeywords,
         String expectedDocument,
+        String expectedTool,
         String answer,
         List<RagSource> sources,
+        List<ToolCall> toolCalls,
+        String agentStatus,
         Boolean retrievalHit,
+        Boolean toolHit,
         double keywordCoverage,
         double similarity,
+        int ruleScore,
         int score,
+        JudgeStatus judgeStatus,
+        Integer judgeScore,
+        String judgeReason,
+        String judgeModel,
         long latencyMs,
+        long judgeLatencyMs,
         boolean pass,
         FailureType failureType,
         String error

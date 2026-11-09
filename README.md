@@ -1,56 +1,169 @@
 # springboot-eval-demo
 
-一个用于面试演示的 **RAG 评测平台**：数据集 → 异步评测 → 指标计算 → 报告与失败归因。
+RAG 与 Agent 评测平台：数据集 → 异步评测 → 规则指标 + LLM-as-judge → 报告与失败归因。
 
-项目刻意保持轻量：单机 Spring Boot + 原生 HTML/JS 前端 + 内存存储，不接数据库、不引入 Python 评测框架，
-重点是把评测闭环和指标设计讲清楚。
+项目刻意保持轻量：Spring Boot 3.3.5 + Java 17 + 原生 HTML/JS 前端 + 内存存储，不接数据库，不引入 Python 评测框架。
+重点是把评测闭环、双目标接入和 judge 降级讲清楚。
 
-## 1. 评测流程
+## 1. 架构
 
 ```text
-浏览器选择数据集
-  → POST /api/runs 创建运行（异步）
-  → 逐条调用被测 RAG：POST {rag-base-url}/api/chat
-  → 计算指标：检索命中 / 关键词覆盖 / 答案相似度 / 耗时
+浏览器
+  → 选择数据集（RAG / Agent）
+  → POST /api/runs 创建评测（异步）
+  → 根据 dataset.targetType 选择被测系统
+       RAG   → POST {RAG_BASE_URL}/api/chat
+       Agent → POST {AGENT_BASE_URL}/api/agent/chat
+  → 规则指标（检索/工具/关键词/相似度）
+  → 可选 LLM-as-judge（智谱 GLM-4.7）
   → 汇总 + 失败归因
   → 前端轮询进度并展示报告
 ```
 
-被测系统是独立的 `springboot-rag-demo`，默认地址 `http://localhost:8081`；
-本评测项目不直接持有大模型 Key，Key 由 RAG 服务自己读取。
+评测平台只调用两个现有项目的 HTTP 接口，不修改它们的代码。
 
-## 2. 指标
+## 2. 评测目标
+
+| 类型 | 被测接口 | 返回 |
+|---|---|---|
+| RAG | `POST /api/chat` | `{code, message, data:{answer, sources}}` |
+| Agent | `POST /api/agent/chat` | `{sessionId, answer, status, toolCalls}` |
+
+每个 Agent 用例使用独立 `sessionId`（`eval-<runId>-<caseId>`），避免会话记忆互相污染。
+
+## 3. 指标
+
+### RAG
 
 | 指标 | 说明 |
 |---|---|
-| Retrieval Hit | 期望来源文档名是否出现在 RAG 返回的 `sources` 中；未配置期望文档时为 `null` |
-| Keyword Coverage | 期望关键词在回答中的覆盖率，0~1 |
-| Answer Similarity | 回答与参考答案的字符 bigram Dice 相似度，0~1 |
-| Latency | 单条用例调用耗时 |
-| Score | `keywordCoverage * 0.6 + similarity * 0.4`，换算为 0~100 |
-| Pass | 检索命中（或未配置期望文档）且关键词覆盖率 ≥ `eval.pass-threshold` |
+| Retrieval Hit | 期望来源文档是否出现在 `sources` 中 |
+| Keyword Coverage | 期望关键词在回答中的覆盖率 |
+| Answer Similarity | 与参考答案的字符 bigram Dice |
+| Latency | RAG 调用耗时 |
+
+### Agent
+
+| 指标 | 说明 |
+|---|---|
+| Agent Status | `SUCCESS` / `MAX_ITERATIONS` / `LLM_ERROR` |
+| Tool Hit | 期望工具是否出现在 `toolCalls` 中 |
+| Tool Call Count | 本次调用的工具数量 |
+| Keyword Coverage | 最终回答的关键词覆盖率 |
+| Answer Similarity | 与参考答案的字符 bigram Dice |
+| Latency | Agent 调用耗时 |
+
+### LLM-as-judge
+
+Judge 输入：问题、参考答案、上下文（RAG 的 sources 或 Agent 的 toolCalls 结果）、模型回答。
+
+Rubric：
+
+| 维度 | 分值 | 说明 |
+|---|---|---|
+| correctness | 0–40 | 与参考答案事实一致 |
+| faithfulness | 0–30 | 回答被上下文支持，没有编造 |
+| completeness | 0–30 | 覆盖参考答案的关键点 |
+| score | 0–100 | 总分 |
+| reason | 文本 | 评分理由 |
+
+Judge 结果有三种状态：
+
+- `OK`：拿到合法分数，参与 HYBRID 判定
+- `SKIPPED`：未配置 Key / 显式关闭，不影响评测
+- `ERROR`：超时、HTTP 错误、JSON 解析失败，回退规则指标
+
+### 通过规则
+
+`eval.pass-mode`：
+
+| 模式 | 规则 |
+|---|---|
+| `DETERMINISTIC` | 只看规则指标；judge 仅记录，不影响通过 |
+| `HYBRID`（默认） | 规则指标做 guardrail；judge 可用时再要求 `judgeScore ≥ eval.judge.pass-score` |
+
+规则分：
+
+```text
+ruleScore = (keywordCoverage * 0.6 + similarity * 0.4) * 100
+```
+
+有效分：
+
+- judge `OK` 且 HYBRID：取 judgeScore
+- 其他情况：取 ruleScore
 
 失败类型：
 
-- `RETRIEVAL_MISS`：期望文档没有被召回
-- `ANSWER_INCOMPLETE`：召回了，但答案缺失关键信息
-- `TARGET_ERROR`：RAG 服务超时/连接失败/业务错误
+- `RETRIEVAL_MISS`：RAG 检索没召回期望文档
+- `TOOL_MISS`：Agent 没调用期望工具
+- `ANSWER_INCOMPLETE`：答案缺关键信息
+- `AGENT_ERROR`：Agent 状态非 SUCCESS
+- `TARGET_ERROR`：被测系统超时/连接失败/业务错误
+- `JUDGE_FAIL`：规则通过，但 judge 分数低于阈值
 - `PASS`：通过
 
-这样报告不仅能给总分，还能回答“是检索的问题，还是生成的问题”。
+## 4. Judge 模型
 
-## 3. 页面
+默认使用智谱 **GLM-4.7**：
 
-单页前端，启动后访问 <http://localhost:8082/>：
+- 200K 上下文，足够容纳问题 + 参考答案 + 检索片段 + 回答
+- 支持关闭 thinking，降低 judge 延迟和输出 token
+- 支持 JSON 结构化输出
+- 与 RAG 的 DeepSeek 生成模型不同厂商，降低 self-preference bias
 
-- 选择数据集，点击「开始评测」
-- 实时进度条、运行状态
-- 汇总卡片：通过率、平均分、检索命中率、平均耗时
-- 用例结果表：每条用例的通过状态、分数、检索命中、耗时、失败类型
-- 点击用例查看明细：问题、模型回答、参考答案、期望关键词、来源引用、错误信息
-- 历史运行列表，可回看历史报告
+接口：
 
-## 4. 接口
+```text
+POST https://open.bigmodel.cn/api/paas/v4/chat/completions
+Authorization: Bearer ${ZHIPU_API_KEY}
+```
+
+配置：
+
+```yaml
+eval:
+  judge:
+    enabled: ${EVAL_JUDGE_ENABLED:true}
+    base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    api-key: ${ZHIPU_API_KEY:}
+    model: ${ZHIPU_JUDGE_MODEL:glm-4.7}
+    timeout: 60s
+    temperature: 0.0
+    max-tokens: 800
+    thinking: ${ZHIPU_JUDGE_THINKING:disabled}
+    pass-score: 70
+```
+
+说明：
+
+- `api-key` 只从环境变量读取，代码和 README 不保存真实密钥。
+- 没有 `ZHIPU_API_KEY` 时 judge 自动 `SKIPPED`，评测继续使用规则指标。
+- 切到 `glm-5.3` 时，服务端自动改为 `thinking.type=enabled` 并使用 `reasoning_effort=low`，因为 GLM-5.3 不支持关闭思考。
+- 低成本场景可切到 `glm-4.7-flash`；旗舰质量校准可切到 `glm-5.3`。
+
+## 5. 数据集
+
+内置两个数据集：
+
+### RAG 员工手册基线
+
+6 条用例，覆盖年假、考勤、试用期、薪资、离职、培训，期望命中员工手册。
+
+### Agent 工具调用基线
+
+4 条用例：
+
+| 问题 | 期望工具 |
+|---|---|
+| 现在几点？ | `get_current_time` |
+| 计算 (12.5+7.5)*2 等于多少 | `calculator` |
+| 统计「手机卡吧」有多少字符 | `text_stats` |
+| 根据知识库回答：员工手册里年假多少天？ | `rag_query` |
+
+> 计算题可能被模型直接口算而不调用 `calculator`。如果报告出现 `TOOL_MISS`，说明 Agent 没有按工具契约执行，这是评测需要暴露的问题，不是平台误判。
+
+## 6. 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -61,96 +174,50 @@
 | GET | `/api/runs/{id}` | 状态、进度、汇总 |
 | GET | `/api/runs/{id}/results` | 逐条用例结果 |
 
-## 5. 配置
+## 7. 页面
 
-```yaml
-server:
-  port: 8082
+启动后访问 <http://localhost:8082/>：
 
-eval:
-  rag-base-url: ${RAG_BASE_URL:http://localhost:8081}
-  connect-timeout: 3s
-  read-timeout: 90s   # RAG /api/chat 内部会调用大模型
-  pass-threshold: 0.6
-```
+- 数据集下拉显示 `[RAG]` / `[Agent]`
+- 汇总卡片：通过率、平均分、检索/工具命中率、Judge 均分、平均耗时
+- 结果表：有效分、规则分、Judge、命中、耗时、失败类型
+- 明细：模型回答、参考答案、来源引用或工具调用、Judge 理由
+- 历史运行可回看
 
-如 RAG 不在 8081，用环境变量覆盖：
-
-```bash
-export RAG_BASE_URL=http://localhost:8081
-```
-
-## 6. 运行
+## 8. 运行
 
 前置条件：
 
 - JDK 17、Maven 3.x
-- 已启动 `springboot-rag-demo`（8081），并配置好其 `DEEPSEEK_API_KEY` / `EMBEDDING_API_KEY`
-- RAG 知识库中已有员工手册类文档（seed 用例基于该文档）
+- RAG 服务（默认 8081）已启动
+- Agent 服务（默认 8080）已启动
+- 如需 judge：配置 `ZHIPU_API_KEY`
 
 ```bash
-# 终端 1：启动 RAG
+# 终端 1：RAG
 cd springboot-rag-demo
 mvn spring-boot:run
 
-# 终端 2：启动评测平台
+# 终端 2：Agent
+cd springboot-react-agent-demo
+mvn spring-boot:run
+
+# 终端 3：评测平台
+export ZHIPU_API_KEY=<your-key>   # 可选；不配则 judge 跳过
 cd springboot-eval-demo
 mvn spring-boot:run
 ```
 
-打开 <http://localhost:8082/>，选择数据集，点击「开始评测」。
+打开 <http://localhost:8082/>，选择 RAG 或 Agent 数据集，点击「开始评测」。
 
-## 7. 当前 seed 数据集
+地址覆盖：
 
-`RAG 员工手册基线`，6 条用例，覆盖：
-
-1. 年假天数
-2. 迟到/早退处理
-3. 试用期
-4. 发薪日
-5. 离职提前通知
-6. 年度培训时长
-
-期望来源均为「员工手册」，参考答案和关键词来自 `springboot-rag-demo/data/员工手册.txt`。
-
-实际运行结果（本地 RAG 可用时）：
-
-```text
-6 / 6 通过
-通过率：100%
-平均分：84.2
-检索命中率：100%
-平均耗时：约 1312 ms
-```
-
-## 8. 项目结构
-
-```text
-src/main/java/com/demo/eval/
-├── EvalApplication.java
-├── config/
-│   ├── EvalProperties.java      # eval.* 配置
-│   ├── EvalConfig.java          # RestClient
-│   └── AsyncConfig.java         # 评测线程池
-├── controller/
-│   ├── DatasetController.java
-│   └── RunController.java
-├── dto/                         # 请求/视图 DTO
-├── model/                       # 数据集、用例、运行、结果、指标
-├── service/
-│   ├── DatasetService.java      # seed 数据集
-│   ├── RagClient.java           # 调用 RAG /api/chat
-│   ├── MetricService.java       # 指标计算与失败归因
-│   └── EvalRunService.java      # 异步执行与汇总
-└── web/GlobalExceptionHandler.java
-src/main/resources/
-├── application.yml
-└── static/index.html            # 单页前端
-src/test/java/com/demo/eval/
-├── EvalApplicationTests.java
-└── service/
-    ├── MetricServiceTest.java
-    └── RagClientTest.java
+```bash
+export RAG_BASE_URL=http://localhost:8081
+export AGENT_BASE_URL=http://localhost:8080
+export EVAL_PASS_MODE=HYBRID
+export EVAL_JUDGE_ENABLED=true
+export ZHIPU_JUDGE_MODEL=glm-4.7
 ```
 
 ## 9. 测试
@@ -159,36 +226,56 @@ src/test/java/com/demo/eval/
 mvn test
 ```
 
-当前 8 个测试：
+覆盖：
 
-- 指标计算 4 个：通过、检索未命中、答案不完整、目标异常
-- RAG 客户端 3 个：成功、业务错误、HTTP 错误
-- Spring 上下文 1 个
+- 指标：RAG 命中/未命中/答案不完整、Agent 工具命中/未命中/Agent 异常、HYBRID judge 未通过、judge 跳过回退
+- RAG 客户端：成功、业务错误、HTTP 错误
+- Agent 客户端：成功、HTTP 错误
+- Judge：合法 JSON、非法 JSON、HTTP 错误、无 Key 跳过
+- Spring 上下文冒烟
 
-## 10. 面试讲解要点
+## 10. 项目结构
 
-1. **为什么不能只看最终答案**：RAG 有检索和生成两段，报告用 `Retrieval Hit` 与 `Keyword Coverage` 做失败归因。
-2. **指标怎么设计**：检索看来源命中，答案看关键词覆盖和相似度，耗时看体验；总分是加权，不替代逐项指标。
-3. **为什么异步**：RAG 单条调用包含检索 + 大模型，6 条用例串行会阻塞 HTTP 请求；用线程池执行，前端轮询进度。
-4. **为什么内存存储**：demo 聚焦评测闭环；生产替换为 MySQL/PostgreSQL 即可，接口不变。
-5. **为什么用 Spring Boot**：评测核心是编排、指标和报告，不是模型训练；Java 与现有 RAG/Agent 项目一致，便于讲清工程实现。
+```text
+src/main/java/com/demo/eval/
+├── EvalApplication.java
+├── config/
+│   ├── EvalProperties.java       # RAG/Agent 地址、超时、通过模式
+│   ├── JudgeProperties.java      # 智谱 judge 配置
+│   ├── EvalConfig.java           # 三个 RestClient
+│   └── AsyncConfig.java          # 评测线程池
+├── controller/
+│   ├── DatasetController.java
+│   └── RunController.java
+├── dto/                          # 请求/视图 DTO
+├── model/                        # 数据集、用例、结果、judge、工具调用
+├── service/
+│   ├── DatasetService.java       # 两个 seed 数据集
+│   ├── RagClient.java
+│   ├── AgentClient.java
+│   ├── JudgeService.java         # 智谱 GLM judge
+│   ├── MetricService.java        # 规则指标 + judge 合并 + 归因
+│   └── EvalRunService.java       # 异步执行与汇总
+└── web/GlobalExceptionHandler.java
+src/main/resources/
+├── application.yml
+└── static/index.html
+```
 
-## 11. 已知限制与后续增强
+## 11. 已知限制
 
-当前限制：
+- 内存存储，重启后运行记录丢失
+- 数据集固定为 seed 数据，暂不支持页面上传/编辑
+- Judge 对上下文只取前 8 条 RAG sources 或 5 条 Agent toolCalls，且做字符截断
+- Agent 只评单轮任务和现有 `toolCalls`，不包含完整 Thought/迭代轨迹
+- 未做并发限流、缓存、统计显著性和数据污染检测
+- Judge 存在模型偏差，建议固定模型版本和 prompt，并抽样人工校准
 
-- 数据集固定为 6 条 seed 用例，暂不支持页面上传/编辑
-- 内存存储，重启后历史运行丢失
-- 指标为确定性指标，未接 LLM-as-judge
-- 仅评测 RAG，不评测 Agent 轨迹
-- 单机单线程顺序执行，未做并发和限流
-- 没有统计显著性、置信区间、数据污染检测
-
-后续可加：
+## 12. 后续扩展
 
 - 数据集导入/编辑（JSON/CSV）
-- LLM-as-judge（DeepSeek JSON 评分 + 人工复核）
-- Agent 适配器：任务成功率、工具调用正确率、轨迹步数
-- 持久化（MySQL/PostgreSQL）与多数据集版本
+- Judge 子分数展示与人工复核
+- Agent 轨迹评分（Thought 步数、工具参数正确性）
+- 持久化（MySQL/PostgreSQL）
 - CI 回归门禁、版本 A/B、趋势图
-- 并发执行、缓存、失败重试
+- 多 judge 投票与一致性分析

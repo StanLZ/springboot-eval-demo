@@ -7,8 +7,31 @@ eval:
   connect-timeout: 3s
   # RAG /api/chat 内部会调用大模型，读取超时留足余量
   read-timeout: 90s
-  # 关键词覆盖率阈值：达到该值且检索命中，才判定通过
+
+  # 被测 Agent 服务：默认 springboot-react-agent-demo 的 8080
+  agent-base-url: ${AGENT_BASE_URL:http://localhost:8080}
+  # Agent 一次任务可能包含多次 LLM / 工具调用，读取超时更长
+  agent-read-timeout: 120s
+
+  # 关键词覆盖率阈值：规则指标通过线
   pass-threshold: 0.6
+  # DETERMINISTIC：只看规则；HYBRID：规则 guardrail + judge 达标
+  pass-mode: ${EVAL_PASS_MODE:HYBRID}
+
+  judge:
+    enabled: ${EVAL_JUDGE_ENABLED:true}
+    # 智谱 OpenAI 兼容接口
+    base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas/v4}
+    # 只从环境变量读取，禁止在代码/配置中写明文
+    api-key: ${ZHIPU_API_KEY:}
+    # 默认 GLM-4.7：200K 上下文、可关闭 thinking、支持 JSON 输出
+    model: ${ZHIPU_JUDGE_MODEL:glm-4.7}
+    timeout: 60s
+    temperature: 0.0
+    max-tokens: 800
+    # GLM-4.7 用 disabled；切到 GLM-5.3 时服务端会自动改为 enabled
+    thinking: ${ZHIPU_JUDGE_THINKING:disabled}
+    pass-score: 70
 
 logging:
   level:

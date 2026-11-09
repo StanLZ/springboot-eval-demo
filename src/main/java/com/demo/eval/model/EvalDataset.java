@@ -9,6 +9,7 @@ public record EvalDataset(
         long id,
         String name,
         String description,
+        EvalTargetType targetType,
         List<EvalCase> cases
 ) {
 }

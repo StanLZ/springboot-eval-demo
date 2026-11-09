@@ -1,6 +1,7 @@
 package com.demo.eval.service;
 
 import com.demo.eval.config.EvalProperties;
+import com.demo.eval.model.PassMode;
 import com.demo.eval.model.RagAnswer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,14 @@ class RagClientTest {
 
     @BeforeEach
     void setUp() {
-        EvalProperties properties = new EvalProperties(BASE_URL, Duration.ofSeconds(1), Duration.ofSeconds(5), 0.6);
+        EvalProperties properties = new EvalProperties(
+                BASE_URL,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(5),
+                0.6,
+                "http://agent.test",
+                Duration.ofSeconds(5),
+                PassMode.HYBRID);
         RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         server = MockRestServiceServer.bindTo(builder).build();
         client = new RagClient(properties, builder.build());

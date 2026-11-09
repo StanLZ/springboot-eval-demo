@@ -6,6 +6,7 @@ import com.demo.eval.model.RagSource;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -28,7 +29,8 @@ public class RagClient {
     private final RestClient restClient;
     private final String baseUrl;
 
-    public RagClient(EvalProperties properties, RestClient ragRestClient) {
+    public RagClient(EvalProperties properties,
+                     @Qualifier("ragRestClient") RestClient ragRestClient) {
         this.restClient = ragRestClient;
         this.baseUrl = properties.ragBaseUrl();
     }
