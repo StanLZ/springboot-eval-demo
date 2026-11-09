@@ -1,0 +1,15 @@
+server:
+  port: 8082
+
+eval:
+  # 被测 RAG 服务：默认 springboot-rag-demo 的 8081
+  rag-base-url: ${RAG_BASE_URL:http://localhost:8081}
+  connect-timeout: 3s
+  # RAG /api/chat 内部会调用大模型，读取超时留足余量
+  read-timeout: 90s
+  # 关键词覆盖率阈值：达到该值且检索命中，才判定通过
+  pass-threshold: 0.6
+
+logging:
+  level:
+    com.demo.eval: info
